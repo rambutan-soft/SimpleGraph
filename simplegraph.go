@@ -1,6 +1,7 @@
 package simplegraph
 
 import (
+	"errors"
 	"sync"
 )
 
@@ -36,16 +37,24 @@ func (g *SimpleGraph) Add(key string, data interface{}) {
 	}
 }
 
-// func (g *SimpleGraph) get(key string) *Node {
-// 	return g.Nodes[key]
-// }
+//Get ... get the node
+func (g *SimpleGraph) Get(key string) (v *Node, err error) {
+	g.RLock()
+	v = g.Nodes[key]
+	g.RUnlock()
+
+	if v == nil {
+		err = errors.New("invalid key")
+	}
+
+	return
+}
 
 //Connect ... allow recursive for now, will see
 func (g *SimpleGraph) Connect(parentKey string, childKey string, edge interface{}) bool {
 	g.RLock()
 	defer g.RUnlock()
 
-	// get vertexes and check for validity of keys
 	val := g.Nodes[parentKey]
 	childVal := g.Nodes[childKey]
 
@@ -62,110 +71,86 @@ func (g *SimpleGraph) Connect(parentKey string, childKey string, edge interface{
 	val.Unlock()
 	childVal.Unlock()
 
-	// success
 	return true
 }
 
-/*
-func (g *SimpleGraph) Disconnect(key string, otherKey string) bool {
-	// recursive edges are forbidden
-	if key == otherKey {
-		return false
-	}
-
-	// lock graph for reading until this method is finished to prevent changes made by other goroutines while this one is running
+//Disconnect ... remove connection
+func (g *SimpleGraph) Disconnect(parentKey string, childKey string) bool {
 	g.RLock()
 	defer g.RUnlock()
 
-	// get vertexes and check for validity of keys
-	v := g.get(key)
-	otherV := g.get(otherKey)
+	val := g.Nodes[parentKey]
+	childVal := g.Nodes[childKey]
 
-	if v == nil || otherV == nil {
+	if val == nil || childVal == nil {
 		return false
 	}
 
-	// delete the edge from both vertexes
-	v.Lock()
-	otherV.Lock()
+	val.Lock()
+	childVal.Lock()
 
-	delete(v.Edges, otherV)
-	delete(otherV.Edges, v)
+	delete(val.EdgesDown, childVal)
+	delete(childVal.EdgesUp, val)
 
-	v.Unlock()
-	otherV.Unlock()
+	val.Unlock()
+	childVal.Unlock()
 
 	return true
+
 }
 
-func (v *Node) GetNeighbors() map[*Node]int {
-	if v == nil {
-		return nil
-	}
-
-	v.RLock()
-	neighbors := v.Edges
-	v.RUnlock()
-
-	return neighbors
-}
-
+//Delete ... delete node
 func (g *SimpleGraph) Delete(key string) bool {
-	// lock graph until this method is finished to prevent changes made by other goroutines while this one is looping etc.
 	g.Lock()
 	defer g.Unlock()
 
-	// get vertex in question
-	v := g.get(key)
+	v := g.Nodes[key]
 	if v == nil {
 		return false
 	}
 
-	// iterate over neighbors, remove edges from neighboring vertexes
-	for neighbor, _ := range v.Edges {
-		// delete edge to the to-be-deleted vertex
-		neighbor.Lock()
-		delete(neighbor.Edges, v)
-		neighbor.Unlock()
+	// remove children relationships
+	for e := range v.EdgesDown {
+		e.Lock()
+		delete(e.EdgesUp, v)
+		e.Unlock()
 	}
 
-	// delete vertex
+	// remove parents relationships
+	for e := range v.EdgesUp {
+		e.Lock()
+		delete(e.EdgesDown, v)
+		e.Unlock()
+	}
+
+	// delete node
 	delete(g.Nodes, key)
 
 	return true
 }
 
-func (g *SimpleGraph) Get(key string) (v *Node, err error) {
+//GetParents ...nice to have func
+func (g *SimpleGraph) GetParents(key string) map[*Node]interface{} {
 	g.RLock()
-	v = g.get(key)
-	g.RUnlock()
+	defer g.RUnlock()
+
+	v := g.Nodes[key]
 
 	if v == nil {
-		err = errors.New("graph: invalid key")
+		return nil
 	}
-
-	return
+	return v.EdgesUp
 }
-*/
 
-// func main() {
-// 	var item Student
-// 	doSomethinWithThisParam(&item)
-// 	fmt.Printf("%+v", item)
-// }
+//GetChildren ...nice to have func
+func (g *SimpleGraph) GetChildren(key string) map[*Node]interface{} {
+	g.RLock()
+	defer g.RUnlock()
 
-// type Student struct {
-// 	ID   string
-// 	Name string
-// }
+	v := g.Nodes[key]
 
-// func doSomethinWithThisParam(item interface{}) {
-// 	switch v := item.(type) {
-// 	case *Student:
-// 		*v = Student{
-// 			ID:   "124",
-// 			Name: "Iman Tumorang",
-// 		}
-// 		// another case
-// 	}
-// }
+	if v == nil {
+		return nil
+	}
+	return v.EdgesDown
+}
