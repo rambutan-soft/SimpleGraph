@@ -1,2 +1,2 @@
 # simplegraph
- A thread-safe graph data structure in Go
+ A simple thread-safe graph data structure in Go
