@@ -7,10 +7,10 @@ import (
 
 //Node ... type node defintion
 type Node struct {
-	Key       string
-	Value     interface{}
-	EdgesUp   map[*Node]interface{}
-	EdgesDown map[*Node]interface{}
+	Key   string
+	Value interface{}
+	Heads map[*Node]interface{}
+	Tails map[*Node]interface{}
 	sync.RWMutex
 }
 
@@ -65,8 +65,8 @@ func (g *SimpleGraph) Connect(parentKey string, childKey string, edge interface{
 	val.Lock()
 	childVal.Lock()
 
-	val.EdgesDown[childVal] = edge
-	childVal.EdgesUp[val] = edge
+	val.Tails[childVal] = edge
+	childVal.Heads[val] = edge
 
 	val.Unlock()
 	childVal.Unlock()
@@ -89,8 +89,8 @@ func (g *SimpleGraph) Disconnect(parentKey string, childKey string) bool {
 	val.Lock()
 	childVal.Lock()
 
-	delete(val.EdgesDown, childVal)
-	delete(childVal.EdgesUp, val)
+	delete(val.Tails, childVal)
+	delete(childVal.Heads, val)
 
 	val.Unlock()
 	childVal.Unlock()
@@ -110,16 +110,16 @@ func (g *SimpleGraph) Delete(key string) bool {
 	}
 
 	// remove children relationships
-	for e := range v.EdgesDown {
+	for e := range v.Tails {
 		e.Lock()
-		delete(e.EdgesUp, v)
+		delete(e.Heads, v)
 		e.Unlock()
 	}
 
 	// remove parents relationships
-	for e := range v.EdgesUp {
+	for e := range v.Heads {
 		e.Lock()
-		delete(e.EdgesDown, v)
+		delete(e.Tails, v)
 		e.Unlock()
 	}
 
@@ -127,6 +127,36 @@ func (g *SimpleGraph) Delete(key string) bool {
 	delete(g.Nodes, key)
 
 	return true
+}
+
+//GetEdge ...
+func (g *SimpleGraph) GetEdge(headKey, tailKey string) interface{} {
+	g.RLock()
+	defer g.RUnlock()
+
+	head := g.Nodes[headKey]
+
+	if head == nil {
+		return nil
+	}
+
+	tail := g.Nodes[tailKey]
+
+	if tail == nil {
+		return nil
+	}
+	var edge interface{}
+
+	//hope this goof for performance
+	if len(head.Tails) > len(tail.Heads) {
+		edge = tail.Heads[head]
+	} else {
+		edge = head.Tails[tail]
+	}
+	if edge == nil {
+		return nil
+	}
+	return edge
 }
 
 //GetParents ...nice to have func
@@ -139,7 +169,7 @@ func (g *SimpleGraph) GetParents(key string) map[*Node]interface{} {
 	if v == nil {
 		return nil
 	}
-	return v.EdgesUp
+	return v.Heads
 }
 
 //GetChildren ...nice to have func
@@ -152,5 +182,86 @@ func (g *SimpleGraph) GetChildren(key string) map[*Node]interface{} {
 	if v == nil {
 		return nil
 	}
-	return v.EdgesDown
+	return v.Tails
+}
+
+//TailConnected ...nice to have func
+func (g *SimpleGraph) TailConnected(headKey, tailKey string) bool {
+	if headKey == tailKey {
+		return true
+	}
+	g.RLock()
+	defer g.RUnlock()
+
+	head := g.Nodes[headKey]
+	if head == nil || len(head.Tails) == 0 {
+		return false
+	}
+
+	tail := g.Nodes[tailKey]
+	if tail == nil || len(tail.Heads) == 0 {
+		return false
+	}
+	head.RLock()
+	defer head.RUnlock()
+	tail.RLock()
+	defer tail.RUnlock()
+
+	_, ok := head.Tails[tail]
+	if ok {
+		return true
+	} else {
+		for t := range head.Tails {
+			if g.TailConnected(t.Key, tailKey) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+//HeadConnected ...nice to have func
+func (g *SimpleGraph) HeadConnected(tailKey, headKey string) bool {
+	if headKey == tailKey {
+		return true
+	}
+	g.RLock()
+	defer g.RUnlock()
+
+	tail := g.Nodes[tailKey]
+	if tail == nil || len(tail.Heads) == 0 {
+		return false
+	}
+
+	head := g.Nodes[headKey]
+	if head == nil || len(head.Tails) == 0 {
+		return false
+	}
+
+	tail.RLock()
+	defer tail.RUnlock()
+	head.RLock()
+	defer head.RUnlock()
+
+	_, ok := tail.Heads[head]
+	if ok {
+		return true
+	} else {
+		for t := range tail.Heads {
+			if g.HeadConnected(tailKey, t.Key) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+
+//Size ...Size
+func (g *SimpleGraph) Size() int {
+	g.RLock()
+	defer g.RUnlock()
+	return len(g.Nodes)
 }
